@@ -1,0 +1,17 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Player {
+  id         String   @id @default(uuid())
+  telegramId String   @unique
+  username   String
+  wins       Int      @default(0)
+  losses     Int      @default(0)
+  draws      Int      @default(0)
+  createdAt  DateTime @default(now())
+}

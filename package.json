@@ -1,0 +1,13 @@
+{
+  "name": "tma-multiplayer-game",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace=web",
+    "dev:server": "npm run dev --workspace=server",
+    "dev": "npm run dev:web & npm run dev:server"
+  }
+}
