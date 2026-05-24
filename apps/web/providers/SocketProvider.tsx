@@ -39,7 +39,7 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
             }
          }
 
-         currentSocket = io("http://localhost:3001");
+         currentSocket = io(process.env.SOCKET_URL || "http://localhost:3001");
          setSocket(currentSocket);
 
          currentSocket.on("connect", () => {
