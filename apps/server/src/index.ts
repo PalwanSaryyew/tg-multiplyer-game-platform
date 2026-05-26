@@ -36,7 +36,6 @@ function createInitialCheckersBoard() {
    return board;
 }
 
-// YENİ: Belli bir taşın yiyebileceği rakip var mı kontrol eder
 function hasCapturesForPiece(
    board: number[],
    idx: number,
@@ -58,25 +57,23 @@ function hasCapturesForPiece(
       let r = row + dr;
       let c = col + dc;
       let foundOpponent = false;
-
       while (r >= 0 && r < 8 && c >= 0 && c < 8) {
          const targetIdx = r * 8 + c;
          const targetPiece = board[targetIdx];
-
          if (targetPiece !== 0) {
             const isOpponent = isRed
                ? targetPiece === 2 || targetPiece === 4
                : targetPiece === 1 || targetPiece === 3;
             if (isOpponent) {
-               if (foundOpponent) break; // İki taş arka arkaya gelmiş
+               if (foundOpponent) break;
                foundOpponent = true;
             } else {
-               break; // Kendi taşı yolu kapatmış
+               break;
             }
          } else if (foundOpponent) {
-            return true; // Rakip taşı geçmiş ve arkası boş, KESİN YİYEBİLİR!
+            return true;
          } else if (!isKing) {
-            break; // Kral değilse boş kareleri uçarak geçemez
+            break;
          }
          r += dr;
          c += dc;
@@ -85,16 +82,19 @@ function hasCapturesForPiece(
    return false;
 }
 
-// YENİ VE DÜZELTİLMİŞ: Tahtada herhangi bir taş için zorunlu yeme var mı?
 function checkForcedCaptures(board: number[], isRed: boolean): boolean {
-  for (let i = 0; i < 64; i++) {
-    const p = board[i];
-    // HATA BURADAYDI: Beyaz taşlar için '!isRed' gönderince kendi taşlarını rakip sanıyordu!
-    // Artık her ikisi için de doğrudan 'isRed' durumunu gönderiyoruz.
-    if (isRed && (p === 1 || p === 3) && hasCapturesForPiece(board, i, isRed)) return true;
-    if (!isRed && (p === 2 || p === 4) && hasCapturesForPiece(board, i, isRed)) return true;
-  }
-  return false;
+   for (let i = 0; i < 64; i++) {
+      const p = board[i];
+      if (isRed && (p === 1 || p === 3) && hasCapturesForPiece(board, i, isRed))
+         return true;
+      if (
+         !isRed &&
+         (p === 2 || p === 4) &&
+         hasCapturesForPiece(board, i, isRed)
+      )
+         return true;
+   }
+   return false;
 }
 
 io.on("connection", (socket) => {
@@ -126,18 +126,128 @@ io.on("connection", (socket) => {
       } catch (error) {}
    });
 
-   // T.K.M KODLARI
+   // --- TAŞ KAĞIT MAKAS KODLARI KORUNDU ---
    socket.on("find_match", () => {
-      /* ... (TKM KODLARI KORUNDU) ... */
+      const username = socket.data.username || "Misafir";
+      const dbId = socket.data.dbId || socket.id;
+      if (waitingPlayer && waitingPlayer.socketId !== socket.id) {
+         const roomId = `room_${Math.random().toString(36).substring(7)}`;
+         socket.join(roomId);
+         io.sockets.sockets.get(waitingPlayer.socketId)?.join(roomId);
+         activeRooms.set(roomId, {
+            isPrivate: false,
+            players: [socket.id, waitingPlayer.socketId],
+            playerDbIds: [dbId, waitingPlayer.dbId],
+            moves: {},
+         });
+         io.to(roomId).emit("match_found", {
+            roomId,
+            players: [
+               { socketId: socket.id, username },
+               {
+                  socketId: waitingPlayer.socketId,
+                  username: waitingPlayer.username,
+               },
+            ],
+         });
+         waitingPlayer = null;
+      } else {
+         waitingPlayer = { socketId: socket.id, dbId, username };
+         socket.emit("waiting_in_queue");
+      }
    });
+
    socket.on("create_private_room", () => {
-      /* ... (TKM KODLARI KORUNDU) ... */
+      const roomId = `pvp_${Math.random().toString(36).substring(7)}`;
+      const username = socket.data.username || "Misafir";
+      const dbId = socket.data.dbId || socket.id;
+      socket.join(roomId);
+      activeRooms.set(roomId, {
+         isPrivate: true,
+         players: [socket.id],
+         playerDbIds: [dbId],
+         playerNames: [username],
+         moves: {},
+      });
+      socket.emit("private_room_created", { roomId });
    });
+
    socket.on("join_private_room", ({ roomId }) => {
-      /* ... (TKM KODLARI KORUNDU) ... */
+      const room = activeRooms.get(roomId);
+      const username = socket.data.username || "Misafir";
+      const dbId = socket.data.dbId || socket.id;
+      if (room && room.isPrivate && room.players.length === 1) {
+         socket.join(roomId);
+         room.players.push(socket.id);
+         room.playerDbIds.push(dbId);
+         room.playerNames.push(username);
+         io.to(roomId).emit("match_found", {
+            roomId,
+            players: [
+               { socketId: room.players[0], username: room.playerNames[0] },
+               { socketId: socket.id, username },
+            ],
+         });
+      } else {
+         socket.emit("room_error", { message: "Oda bulunamadı veya dolu." });
+      }
    });
+
    socket.on("play_move", async ({ roomId, move }) => {
-      /* ... (TKM KODLARI KORUNDU) ... */
+      const room = activeRooms.get(roomId);
+      if (!room) return;
+      room.moves[socket.id] = move;
+      socket.to(roomId).emit("opponent_played");
+      const [p1, p2] = room.players;
+      const [dbId1, dbId2] = room.playerDbIds;
+      if (room.moves[p1] && room.moves[p2]) {
+         const move1 = room.moves[p1];
+         const move2 = room.moves[p2];
+         let winner = null;
+         if (move1 === move2) {
+            winner = "DRAW";
+            await prisma.player
+               .updateMany({
+                  where: { id: { in: [dbId1, dbId2] } },
+                  data: { draws: { increment: 1 } },
+               })
+               .catch(() => {});
+         } else if (
+            (move1 === "ROCK" && move2 === "SCISSORS") ||
+            (move1 === "PAPER" && move2 === "ROCK") ||
+            (move1 === "SCISSORS" && move2 === "PAPER")
+         ) {
+            winner = p1;
+            await prisma.player
+               .update({
+                  where: { id: dbId1 },
+                  data: { wins: { increment: 1 } },
+               })
+               .catch(() => {});
+            await prisma.player
+               .update({
+                  where: { id: dbId2 },
+                  data: { losses: { increment: 1 } },
+               })
+               .catch(() => {});
+         } else {
+            winner = p2;
+            await prisma.player
+               .update({
+                  where: { id: dbId2 },
+                  data: { wins: { increment: 1 } },
+               })
+               .catch(() => {});
+            await prisma.player
+               .update({
+                  where: { id: dbId1 },
+                  data: { losses: { increment: 1 } },
+               })
+               .catch(() => {});
+         }
+         io.to(roomId).emit("game_result", { moves: room.moves, winner });
+         room.moves = {};
+      }
    });
 
    // --- DAMA EŞLEŞTİRME VE MOTORU ---
@@ -153,11 +263,12 @@ io.on("connection", (socket) => {
          io.sockets.sockets.get(checkersWaitingPlayer.socketId)?.join(roomId);
          activeRooms.set(roomId, {
             gameType: "CHECKERS",
+            isPrivate: false,
             players: [checkersWaitingPlayer.socketId, socket.id],
             playerDbIds: [checkersWaitingPlayer.dbId, dbId],
             board: createInitialCheckersBoard(),
             turn: checkersWaitingPlayer.socketId,
-            multiJumpIndex: null, // YENİ: Seri yeme takibi
+            multiJumpIndex: null,
          });
          io.to(roomId).emit("checkers_match_found", {
             roomId,
@@ -179,10 +290,68 @@ io.on("connection", (socket) => {
       }
    });
 
+   // YENİ: Dama Özel Düello Odası Kurma
+   socket.on("checkers_create_private_room", () => {
+      const roomId = `cpvp_${Math.random().toString(36).substring(7)}`;
+      const username = socket.data.username || "Misafir";
+      const dbId = socket.data.dbId || socket.id;
+
+      socket.join(roomId);
+      activeRooms.set(roomId, {
+         gameType: "CHECKERS",
+         isPrivate: true,
+         players: [socket.id],
+         playerDbIds: [dbId],
+         playerNames: [username],
+         board: createInitialCheckersBoard(),
+         turn: null,
+         multiJumpIndex: null,
+      });
+
+      socket.emit("checkers_private_room_created", { roomId });
+   });
+
+   // YENİ: Dama Özel Düello Odasına Katılma
+   socket.on("checkers_join_private_room", ({ roomId }) => {
+      const room = activeRooms.get(roomId);
+      const username = socket.data.username || "Misafir";
+      const dbId = socket.data.dbId || socket.id;
+
+      if (
+         room &&
+         room.gameType === "CHECKERS" &&
+         room.isPrivate &&
+         room.players.length === 1
+      ) {
+         socket.join(roomId);
+         room.players.push(socket.id);
+         room.playerDbIds.push(dbId);
+         room.playerNames.push(username);
+         room.turn = room.players[0]; // Odayı kuran kırmızı (ilk hamle sahibi) olur
+
+         io.to(roomId).emit("checkers_match_found", {
+            roomId: roomId,
+            board: room.board,
+            turn: room.turn,
+            players: [
+               {
+                  socketId: room.players[0],
+                  username: room.playerNames[0],
+                  color: "RED",
+               },
+               { socketId: socket.id, username, color: "WHITE" },
+            ],
+         });
+      } else {
+         socket.emit("checkers_room_error", {
+            message: "Düello odası bulunamadı veya doldu.",
+         });
+      }
+   });
+
    socket.on("checkers_make_move", async ({ roomId, fromIndex, toIndex }) => {
       const room = activeRooms.get(roomId);
       if (!room || room.turn !== socket.id) return;
-
       const board = room.board;
       const piece = board[fromIndex];
       const target = board[toIndex];
@@ -191,8 +360,6 @@ io.on("connection", (socket) => {
       if (isP1Red && piece !== 1 && piece !== 3) return;
       if (!isP1Red && piece !== 2 && piece !== 4) return;
       if (target !== 0) return;
-
-      // YENİ: Seri yeme (multi-jump) devam ediyorsa, SADECE o taşı oynayabilir.
       if (room.multiJumpIndex !== null && room.multiJumpIndex !== fromIndex) {
          socket.emit("checkers_invalid_move", { reason: "MUST_CONTINUE_JUMP" });
          return;
@@ -203,7 +370,6 @@ io.on("connection", (socket) => {
       const toRow = Math.floor(toIndex / 8);
       const toCol = toIndex % 8;
       const isKing = piece === 3 || piece === 4;
-
       if (Math.abs(toRow - fromRow) !== Math.abs(toCol - fromCol)) {
          socket.emit("checkers_invalid_move");
          return;
@@ -248,12 +414,10 @@ io.on("connection", (socket) => {
          }
       }
 
-      // YENİ: Eğer seri yeme sırasındaysa, boş hamle yapamaz. Kesinlikle yemelidir.
       if (room.multiJumpIndex !== null && opponentCount === 0) {
          socket.emit("checkers_invalid_move", { reason: "MUST_CONTINUE_JUMP" });
          return;
       }
-
       const isCaptureMove = opponentCount === 1;
       if (isValidMove && !isCaptureMove && room.multiJumpIndex === null) {
          if (checkForcedCaptures(board, isP1Red)) {
@@ -261,21 +425,17 @@ io.on("connection", (socket) => {
             return;
          }
       }
-
       if (!isValidMove) {
          socket.emit("checkers_invalid_move");
          return;
       }
 
-      // HAMLEYİ UYGULA
       board[toIndex] = piece;
       board[fromIndex] = 0;
       if (jumpedIndex !== -1) board[jumpedIndex] = 0;
-
       let turnEnds = true;
       let promoted = false;
 
-      // KRAL (DAMA) OLMA
       if (isP1Red && toRow === 0 && piece === 1) {
          board[toIndex] = 3;
          promoted = true;
@@ -285,12 +445,11 @@ io.on("connection", (socket) => {
          promoted = true;
       }
 
-      // YENİ: Seri Yeme (Multi-Jump) Kontrolü
       if (jumpedIndex !== -1 && !promoted) {
          const canJumpAgain = hasCapturesForPiece(board, toIndex, isP1Red);
          if (canJumpAgain) {
-            turnEnds = false; // Sıra bitmedi!
-            room.multiJumpIndex = toIndex; // Taşı hafızaya kazı
+            turnEnds = false;
+            room.multiJumpIndex = toIndex;
          }
       }
 
@@ -301,7 +460,6 @@ io.on("connection", (socket) => {
 
       const hasRed = board.includes(1) || board.includes(3);
       const hasWhite = board.includes(2) || board.includes(4);
-
       if (!hasRed || !hasWhite) {
          const winnerId = hasRed ? room.players[0] : room.players[1];
          const loserId = hasRed ? room.players[1] : room.players[0];
@@ -322,7 +480,6 @@ io.on("connection", (socket) => {
          io.to(roomId).emit("checkers_game_over", { winner: winnerId, board });
          activeRooms.delete(roomId);
       } else {
-         // YENİ: Seri yeme durumu varsa bunu frontend'e bildiriyoruz
          io.to(roomId).emit("checkers_board_updated", {
             board,
             turn: room.turn,
@@ -339,5 +496,5 @@ io.on("connection", (socket) => {
    });
 });
 
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => console.log(`🚀 Sunucu ${PORT} portunda!`));

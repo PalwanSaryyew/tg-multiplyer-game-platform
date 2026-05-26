@@ -85,7 +85,7 @@ export default function RPSGame() {
 
    const shareToTelegram = async () => {
       if (!inviteCode) return;
-      const shareUrl = `https://t.me/Nexuz_Space_Bot/app?startapp=${inviteCode}`;
+      const shareUrl = `https://t.me/${process.env.NEXT_PUBLIC_TG_BOT}/${process.env.NEXT_PUBLIC_TG_APP}?startapp=${inviteCode}`;
       const text = `Seni Taş-Kağıt-Makas düellosuna davet ediyorum! Gel kapışalım ⚔️`;
       if (typeof window !== "undefined") {
          const WebApp = (await import("@twa-dev/sdk")).default;

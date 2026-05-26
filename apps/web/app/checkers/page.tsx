@@ -17,19 +17,51 @@ export default function CheckersGame() {
    const [winner, setWinner] = useState<string | null>(null);
    const [moveError, setMoveError] = useState<string | null>(null);
 
+   // --- DÜELLO STATE'LERİ ---
+   const [inviteCode, setInviteCode] = useState<string | null>(null);
+   const [showJoinInput, setShowJoinInput] = useState(false);
+   const [joinCodeInput, setJoinCodeInput] = useState("");
+
    useEffect(() => {
       if (!socket) return;
 
+      // Telegram Botu üzerinden derin link (Deep Link) kontrolü
+      const checkDeepLink = async () => {
+         if (typeof window !== "undefined") {
+            const WebApp = (await import("@twa-dev/sdk")).default;
+            const startParam = WebApp.initDataUnsafe?.start_param;
+            if (startParam && startParam.startsWith("cpvp_")) {
+               socket.emit("checkers_join_private_room", {
+                  roomId: startParam,
+               });
+            }
+         }
+      };
+      checkDeepLink();
+
       socket.on("checkers_waiting_in_queue", () => setIsSearching(true));
+
+      // Düello odası başarıyla oluşturulduğunda kodu ekrana bas
+      socket.on("checkers_private_room_created", ({ roomId }) =>
+         setInviteCode(roomId),
+      );
+
+      socket.on("checkers_room_error", (data) => {
+         setMoveError(data.message);
+         setTimeout(() => setMoveError(null), 3000);
+      });
 
       socket.on("checkers_match_found", (data) => {
          setIsSearching(false);
+         setInviteCode(null);
+         setShowJoinInput(false);
          setRoomData(data);
          setBoard(data.board);
          setTurn(data.turn);
          setWinner(null);
          setSelectedCell(null);
          setMoveError(null);
+
          const me = data.players.find((p: any) => p.socketId === socket.id);
          if (me) setMyColor(me.color);
       });
@@ -38,8 +70,6 @@ export default function CheckersGame() {
          setBoard(data.board);
          setTurn(data.turn);
          setMoveError(null);
-
-         // YENİ: Eğer seri yeme devam ediyorsa, o taşı otomatik seç!
          if (
             data.multiJumpIndex !== undefined &&
             data.multiJumpIndex !== null
@@ -64,7 +94,7 @@ export default function CheckersGame() {
             );
          } else if (data?.reason === "MUST_CONTINUE_JUMP") {
             setMoveError(
-               "Seri yeme devam ediyor! Aynı taşla yemeye devam etmelisin.",
+               "Seri yeme devam ediyor! Sadece işaretli taşı oynayabilirsin.",
             );
          } else {
             setSelectedCell(null);
@@ -74,6 +104,8 @@ export default function CheckersGame() {
 
       return () => {
          socket.off("checkers_waiting_in_queue");
+         socket.off("checkers_private_room_created");
+         socket.off("checkers_room_error");
          socket.off("checkers_match_found");
          socket.off("checkers_board_updated");
          socket.off("checkers_game_over");
@@ -84,16 +116,35 @@ export default function CheckersGame() {
    const handleFindMatch = () => {
       socket?.emit("checkers_find_match");
    };
+   const handleCreatePrivateRoom = () => {
+      socket?.emit("checkers_create_private_room");
+   };
+   const handleJoinPrivateRoom = () => {
+      if (!joinCodeInput.trim()) return;
+      socket?.emit("checkers_join_private_room", {
+         roomId: joinCodeInput.trim(),
+      });
+   };
+
+   const shareToTelegram = async () => {
+      if (!inviteCode) return;
+      const shareUrl = `https://t.me/${process.env.NEXT_PUBLIC_TG_BOT}/${process.env.NEXT_PUBLIC_TG_APP}?startapp=${inviteCode}`;
+      const text = `Seni canlı Dama (Checkers) düellosuna davet ediyorum! Bakalım beni yenebilecek misin? ⚔️`;
+      if (typeof window !== "undefined") {
+         const WebApp = (await import("@twa-dev/sdk")).default;
+         WebApp.openTelegramLink(
+            `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(text)}`,
+         );
+      }
+   };
 
    const handleCellClick = (index: number) => {
       if (!socket || !roomData || winner || turn !== socket.id) return;
 
-      // YENİ: Seri yeme zorunluluğu varsa BAŞKA TAŞ seçmesini tamamen engelle
       if (
          roomData.multiJumpIndex !== null &&
          roomData.multiJumpIndex !== undefined
       ) {
-         // Eğer tıklanan yer boş kare değilse ve kilitli taşımız değilse engelle
          if (board[index] !== 0 && index !== roomData.multiJumpIndex) {
             setMoveError(
                "Seri yeme devam ediyor! Sadece işaretli taşı oynayabilirsin.",
@@ -104,7 +155,6 @@ export default function CheckersGame() {
       }
 
       const cellValue = board[index];
-
       if (
          (myColor === "RED" && (cellValue === 1 || cellValue === 3)) ||
          (myColor === "WHITE" && (cellValue === 2 || cellValue === 4))
@@ -159,14 +209,101 @@ export default function CheckersGame() {
 
             <AnimatePresence mode="wait">
                {!roomData ? (
-                  <motion.button
-                     key="find"
-                     onClick={handleFindMatch}
-                     disabled={isSearching || !isConnected}
-                     className={`w-full py-3 rounded-lg font-bold transition-colors ${isSearching ? "bg-blue-600 animate-pulse text-white" : !isConnected ? "bg-zinc-700 text-zinc-500" : "bg-purple-600 hover:bg-purple-500 text-white"}`}
-                  >
-                     {isSearching ? "Rakip Aranıyor..." : "🎲 Dama Maçı Ara"}
-                  </motion.button>
+                  !inviteCode ? (
+                     <motion.div
+                        key="lobby"
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: 20 }}
+                        className="flex flex-col gap-3"
+                     >
+                        <button
+                           onClick={handleFindMatch}
+                           disabled={isSearching || !isConnected}
+                           className={`w-full py-3 rounded-lg font-bold transition-colors ${isSearching ? "bg-blue-600 animate-pulse text-white" : !isConnected ? "bg-zinc-700 text-zinc-500" : "bg-purple-600 hover:bg-purple-500 text-white"}`}
+                        >
+                           {isSearching
+                              ? "Rakip Aranıyor..."
+                              : "🎲 Rastgele Maç Ara"}
+                        </button>
+
+                        {!isSearching && (
+                           <div className="flex gap-2 w-full">
+                              <button
+                                 onClick={handleCreatePrivateRoom}
+                                 disabled={!isConnected}
+                                 className="flex-1 py-3 bg-purple-700 hover:bg-purple-600 text-white rounded-lg font-bold transition-colors text-sm"
+                              >
+                                 ⚔️ Düello Kur
+                              </button>
+                              <button
+                                 onClick={() =>
+                                    setShowJoinInput(!showJoinInput)
+                                 }
+                                 disabled={!isConnected}
+                                 className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white rounded-lg font-bold transition-colors text-sm"
+                              >
+                                 Katıl
+                              </button>
+                           </div>
+                        )}
+
+                        {showJoinInput && !isSearching && (
+                           <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              className="flex gap-2 mt-2"
+                           >
+                              <input
+                                 type="text"
+                                 placeholder="Oda Kodu (cpvp_...)"
+                                 value={joinCodeInput}
+                                 onChange={(e) =>
+                                    setJoinCodeInput(e.target.value)
+                                 }
+                                 className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-purple-500"
+                              />
+                              <button
+                                 onClick={handleJoinPrivateRoom}
+                                 className="bg-purple-600 hover:bg-purple-500 px-4 rounded-lg font-bold text-sm"
+                              >
+                                 Git
+                              </button>
+                           </motion.div>
+                        )}
+                     </motion.div>
+                  ) : (
+                     <motion.div
+                        key="invite"
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="text-center bg-zinc-800 p-4 rounded-lg border border-purple-500/50"
+                     >
+                        <h3 className="text-purple-400 font-bold mb-2">
+                           ⚔️ Düello Odası Hazır!
+                        </h3>
+                        <p className="text-xs text-zinc-400 mb-4">
+                           Arkadaşını davet et veya alttaki kodu gönder.
+                        </p>
+                        <div className="bg-zinc-950 p-3 rounded-lg mb-4 select-all font-mono text-xs border border-zinc-700">
+                           {inviteCode}
+                        </div>
+                        <div className="flex gap-2">
+                           <button
+                              onClick={shareToTelegram}
+                              className="flex-1 bg-blue-600 hover:bg-blue-500 py-2 rounded-lg font-bold text-xs"
+                           >
+                              Telegram'da Paylaş
+                           </button>
+                           <button
+                              onClick={() => setInviteCode(null)}
+                              className="px-3 bg-zinc-700 hover:bg-zinc-600 rounded-lg font-bold text-xs"
+                           >
+                              İptal
+                           </button>
+                        </div>
+                     </motion.div>
+                  )
                ) : (
                   <motion.div
                      key="game"
