@@ -20,16 +20,19 @@ const io = new Server(httpServer, {
 });
 
 let waitingPlayer: any = null;
-const activeRooms = new Map();
 let checkersWaitingPlayer: any = null;
+let c4Waiting: any = null;
+const activeRooms = new Map();
+const hubLobbies = new Map();
 
+// --- YARDIMCI FONKSİYONLAR ---
 function createInitialCheckersBoard() {
    const board = Array(64).fill(0);
    for (let row = 0; row < 8; row++) {
       for (let col = 0; col < 8; col++) {
          if ((row + col) % 2 === 1) {
-            if (row < 3) board[row * 8 + col] = 2; // Beyaz
-            if (row > 4) board[row * 8 + col] = 1; // Kırmızı
+            if (row < 3) board[row * 8 + col] = 2;
+            if (row > 4) board[row * 8 + col] = 1;
          }
       }
    }
@@ -97,6 +100,64 @@ function checkForcedCaptures(board: number[], isRed: boolean): boolean {
    return false;
 }
 
+function createC4Board() {
+   return Array(42).fill(0);
+}
+
+function checkC4Winner(board: number[]) {
+   const rows = 6;
+   const cols = 7;
+   for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols - 3; c++) {
+         const i = r * cols + c;
+         if (
+            board[i] !== 0 &&
+            board[i] === board[i + 1] &&
+            board[i] === board[i + 2] &&
+            board[i] === board[i + 3]
+         )
+            return board[i];
+      }
+   }
+   for (let r = 0; r < rows - 3; r++) {
+      for (let c = 0; r * cols + c < board.length && c < cols; c++) {
+         const i = r * cols + c;
+         if (
+            board[i] !== 0 &&
+            board[i] === board[i + cols] &&
+            board[i] === board[i + cols * 2] &&
+            board[i] === board[i + cols * 3]
+         )
+            return board[i];
+      }
+   }
+   for (let r = 0; r < rows - 3; r++) {
+      for (let c = 0; c < cols - 3; c++) {
+         const i = r * cols + c;
+         if (
+            board[i] !== 0 &&
+            board[i] === board[i + cols + 1] &&
+            board[i] === board[i + (cols + 1) * 2] &&
+            board[i] === board[i + (cols + 1) * 3]
+         )
+            return board[i];
+      }
+   }
+   for (let r = 0; r < rows - 3; r++) {
+      for (let c = 3; c < cols; c++) {
+         const i = r * cols + c;
+         if (
+            board[i] !== 0 &&
+            board[i] === board[i + cols - 1] &&
+            board[i] === board[i + (cols - 1) * 2] &&
+            board[i] === board[i + (cols - 1) * 3]
+         )
+            return board[i];
+      }
+   }
+   return board.includes(0) ? null : "DRAW";
+}
+
 io.on("connection", (socket) => {
    console.log(`🟢 Yeni oyuncu: ${socket.id}`);
 
@@ -126,9 +187,97 @@ io.on("connection", (socket) => {
       } catch (error) {}
    });
 
-   // --- TAŞ KAĞIT MAKAS KODLARI KORUNDU ---
-   socket.on("find_match", () => {
-      const username = socket.data.username || "Misafir";
+   // ==========================================
+   // --- ANA MERKEZ LOBİSİ ---
+   // ==========================================
+   socket.on("create_hub_lobby", (data) => {
+      const lobbyId = `lobby_${Math.random().toString(36).substring(7)}`;
+      const username = socket.data.username || data?.username || "Misafir";
+      socket.join(lobbyId);
+      hubLobbies.set(lobbyId, {
+         host: socket.id,
+         players: [{ socketId: socket.id, username }],
+      });
+      socket.emit("hub_lobby_updated", {
+         lobbyId,
+         players: hubLobbies.get(lobbyId).players,
+      });
+   });
+
+   socket.on("join_hub_lobby", (data) => {
+      const lobbyId = data?.lobbyId;
+      const lobby = hubLobbies.get(lobbyId);
+      if (lobby && lobby.players.length === 1) {
+         const username = socket.data.username || data?.username || "Misafir";
+         socket.join(lobbyId);
+         lobby.players.push({ socketId: socket.id, username });
+         io.to(lobbyId).emit("hub_lobby_updated", {
+            lobbyId,
+            players: lobby.players,
+         });
+      } else {
+         socket.emit("room_error", { message: "Lobi bulunamadı veya dolu." });
+      }
+   });
+
+   socket.on("leave_hub_lobby", ({ lobbyId }) => {
+      socket.leave(lobbyId);
+      hubLobbies.delete(lobbyId);
+      socket.to(lobbyId).emit("hub_lobby_closed");
+   });
+
+   socket.on("launch_hub_game", ({ lobbyId, gameType }) => {
+      const lobby = hubLobbies.get(lobbyId);
+      if (!lobby || lobby.host !== socket.id) return;
+      let roomId = "";
+      let gamePath = "";
+
+      if (gameType === "RPS") {
+         roomId = `pvp_${Math.random().toString(36).substring(7)}`;
+         gamePath = "/rps";
+         activeRooms.set(roomId, {
+            isPrivate: true,
+            players: [],
+            playerDbIds: [],
+            playerNames: [],
+            moves: {},
+         });
+      } else if (gameType === "CHECKERS") {
+         roomId = `cpvp_${Math.random().toString(36).substring(7)}`;
+         gamePath = "/checkers";
+         activeRooms.set(roomId, {
+            gameType: "CHECKERS",
+            isPrivate: true,
+            players: [],
+            playerDbIds: [],
+            playerNames: [],
+            board: createInitialCheckersBoard(),
+            turn: null,
+            multiJumpIndex: null,
+         });
+      } else if (gameType === "CONNECT4") {
+         roomId = `c4pvp_${Math.random().toString(36).substring(7)}`;
+         gamePath = "/connect4";
+         activeRooms.set(roomId, {
+            gameType: "CONNECT4",
+            isPrivate: true,
+            players: [],
+            playerDbIds: [],
+            playerNames: [],
+            board: createC4Board(),
+            turn: null,
+         });
+      }
+
+      io.to(lobbyId).emit("hub_game_launched", { gamePath, roomId });
+   });
+
+   // ==========================================
+   // --- OYUN İÇİ ODALAR (Korumalar Eklendi) ---
+   // ==========================================
+
+   socket.on("find_match", (data) => {
+      const username = socket.data.username || data?.username || "Misafir";
       const dbId = socket.data.dbId || socket.id;
       if (waitingPlayer && waitingPlayer.socketId !== socket.id) {
          const roomId = `room_${Math.random().toString(36).substring(7)}`;
@@ -157,9 +306,9 @@ io.on("connection", (socket) => {
       }
    });
 
-   socket.on("create_private_room", () => {
+   socket.on("create_private_room", (data) => {
       const roomId = `pvp_${Math.random().toString(36).substring(7)}`;
-      const username = socket.data.username || "Misafir";
+      const username = socket.data.username || data?.username || "Misafir";
       const dbId = socket.data.dbId || socket.id;
       socket.join(roomId);
       activeRooms.set(roomId, {
@@ -172,22 +321,54 @@ io.on("connection", (socket) => {
       socket.emit("private_room_created", { roomId });
    });
 
-   socket.on("join_private_room", ({ roomId }) => {
+   socket.on("join_private_room", (data) => {
+      const roomId = data?.roomId;
       const room = activeRooms.get(roomId);
-      const username = socket.data.username || "Misafir";
+      const username = socket.data.username || data?.username || "Misafir";
       const dbId = socket.data.dbId || socket.id;
-      if (room && room.isPrivate && room.players.length === 1) {
-         socket.join(roomId);
-         room.players.push(socket.id);
-         room.playerDbIds.push(dbId);
-         room.playerNames.push(username);
-         io.to(roomId).emit("match_found", {
-            roomId,
-            players: [
-               { socketId: room.players[0], username: room.playerNames[0] },
-               { socketId: socket.id, username },
-            ],
-         });
+      if (room && room.isPrivate) {
+         // FIX: Çift istek koruması
+         if (room.players.includes(socket.id)) {
+            if (room.players.length === 2) {
+               socket.emit("match_found", {
+                  roomId,
+                  players: [
+                     {
+                        socketId: room.players[0],
+                        username: room.playerNames[0],
+                     },
+                     {
+                        socketId: room.players[1],
+                        username: room.playerNames[1],
+                     },
+                  ],
+               });
+            }
+            return;
+         }
+         if (room.players.length < 2) {
+            socket.join(roomId);
+            room.players.push(socket.id);
+            room.playerDbIds.push(dbId);
+            room.playerNames.push(username);
+            if (room.players.length === 2) {
+               io.to(roomId).emit("match_found", {
+                  roomId,
+                  players: [
+                     {
+                        socketId: room.players[0],
+                        username: room.playerNames[0],
+                     },
+                     {
+                        socketId: room.players[1],
+                        username: room.playerNames[1],
+                     },
+                  ],
+               });
+            }
+         } else {
+            socket.emit("room_error", { message: "Oda bulunamadı veya dolu." });
+         }
       } else {
          socket.emit("room_error", { message: "Oda bulunamadı veya dolu." });
       }
@@ -250,9 +431,9 @@ io.on("connection", (socket) => {
       }
    });
 
-   // --- DAMA EŞLEŞTİRME VE MOTORU ---
-   socket.on("checkers_find_match", () => {
-      const username = socket.data.username || "Misafir";
+   // CHECKERS
+   socket.on("checkers_find_match", (data) => {
+      const username = socket.data.username || data?.username || "Misafir";
       const dbId = socket.data.dbId || socket.id;
       if (
          checkersWaitingPlayer &&
@@ -290,12 +471,10 @@ io.on("connection", (socket) => {
       }
    });
 
-   // YENİ: Dama Özel Düello Odası Kurma
-   socket.on("checkers_create_private_room", () => {
+   socket.on("checkers_create_private_room", (data) => {
       const roomId = `cpvp_${Math.random().toString(36).substring(7)}`;
-      const username = socket.data.username || "Misafir";
+      const username = socket.data.username || data?.username || "Misafir";
       const dbId = socket.data.dbId || socket.id;
-
       socket.join(roomId);
       activeRooms.set(roomId, {
          gameType: "CHECKERS",
@@ -307,41 +486,68 @@ io.on("connection", (socket) => {
          turn: null,
          multiJumpIndex: null,
       });
-
       socket.emit("checkers_private_room_created", { roomId });
    });
 
-   // YENİ: Dama Özel Düello Odasına Katılma
-   socket.on("checkers_join_private_room", ({ roomId }) => {
+   socket.on("checkers_join_private_room", (data) => {
+      const roomId = data?.roomId;
       const room = activeRooms.get(roomId);
-      const username = socket.data.username || "Misafir";
+      const username = socket.data.username || data?.username || "Misafir";
       const dbId = socket.data.dbId || socket.id;
-
-      if (
-         room &&
-         room.gameType === "CHECKERS" &&
-         room.isPrivate &&
-         room.players.length === 1
-      ) {
-         socket.join(roomId);
-         room.players.push(socket.id);
-         room.playerDbIds.push(dbId);
-         room.playerNames.push(username);
-         room.turn = room.players[0]; // Odayı kuran kırmızı (ilk hamle sahibi) olur
-
-         io.to(roomId).emit("checkers_match_found", {
-            roomId: roomId,
-            board: room.board,
-            turn: room.turn,
-            players: [
-               {
-                  socketId: room.players[0],
-                  username: room.playerNames[0],
-                  color: "RED",
-               },
-               { socketId: socket.id, username, color: "WHITE" },
-            ],
-         });
+      if (room && room.gameType === "CHECKERS" && room.isPrivate) {
+         // FIX: Çift istek koruması
+         if (room.players.includes(socket.id)) {
+            if (room.players.length === 2) {
+               socket.emit("checkers_match_found", {
+                  roomId: roomId,
+                  board: room.board,
+                  turn: room.turn,
+                  players: [
+                     {
+                        socketId: room.players[0],
+                        username: room.playerNames[0],
+                        color: "RED",
+                     },
+                     {
+                        socketId: room.players[1],
+                        username: room.playerNames[1],
+                        color: "WHITE",
+                     },
+                  ],
+               });
+            }
+            return;
+         }
+         if (room.players.length < 2) {
+            socket.join(roomId);
+            room.players.push(socket.id);
+            room.playerDbIds.push(dbId);
+            room.playerNames.push(username);
+            if (room.players.length === 2) {
+               room.turn = room.players[0];
+               io.to(roomId).emit("checkers_match_found", {
+                  roomId: roomId,
+                  board: room.board,
+                  turn: room.turn,
+                  players: [
+                     {
+                        socketId: room.players[0],
+                        username: room.playerNames[0],
+                        color: "RED",
+                     },
+                     {
+                        socketId: room.players[1],
+                        username: room.playerNames[1],
+                        color: "WHITE",
+                     },
+                  ],
+               });
+            }
+         } else {
+            socket.emit("checkers_room_error", {
+               message: "Düello odası bulunamadı veya doldu.",
+            });
+         }
       } else {
          socket.emit("checkers_room_error", {
             message: "Düello odası bulunamadı veya doldu.",
@@ -356,7 +562,6 @@ io.on("connection", (socket) => {
       const piece = board[fromIndex];
       const target = board[toIndex];
       const isP1Red = socket.id === room.players[0];
-
       if (isP1Red && piece !== 1 && piece !== 3) return;
       if (!isP1Red && piece !== 2 && piece !== 4) return;
       if (target !== 0) return;
@@ -374,7 +579,6 @@ io.on("connection", (socket) => {
          socket.emit("checkers_invalid_move");
          return;
       }
-
       const rowStep = Math.sign(toRow - fromRow);
       const colStep = Math.sign(toCol - fromCol);
       let r = fromRow + rowStep;
@@ -401,7 +605,6 @@ io.on("connection", (socket) => {
          r += rowStep;
          c += colStep;
       }
-
       if (opponentCount > 1) isValidMove = false;
       if (!isKing) {
          if (opponentCount === 0 && Math.abs(toRow - fromRow) !== 1)
@@ -413,7 +616,6 @@ io.on("connection", (socket) => {
             if (!isP1Red && toRow < fromRow) isValidMove = false;
          }
       }
-
       if (room.multiJumpIndex !== null && opponentCount === 0) {
          socket.emit("checkers_invalid_move", { reason: "MUST_CONTINUE_JUMP" });
          return;
@@ -435,7 +637,6 @@ io.on("connection", (socket) => {
       if (jumpedIndex !== -1) board[jumpedIndex] = 0;
       let turnEnds = true;
       let promoted = false;
-
       if (isP1Red && toRow === 0 && piece === 1) {
          board[toIndex] = 3;
          promoted = true;
@@ -444,7 +645,6 @@ io.on("connection", (socket) => {
          board[toIndex] = 4;
          promoted = true;
       }
-
       if (jumpedIndex !== -1 && !promoted) {
          const canJumpAgain = hasCapturesForPiece(board, toIndex, isP1Red);
          if (canJumpAgain) {
@@ -452,7 +652,6 @@ io.on("connection", (socket) => {
             room.multiJumpIndex = toIndex;
          }
       }
-
       if (turnEnds) {
          room.turn = isP1Red ? room.players[1] : room.players[0];
          room.multiJumpIndex = null;
@@ -488,11 +687,128 @@ io.on("connection", (socket) => {
       }
    });
 
+   // CONNECT 4
+   socket.on("c4_find_match", (data) => {
+      const username = socket.data.username || data?.username || "Misafir";
+      const dbId = socket.data.dbId || socket.id;
+      if (c4Waiting && c4Waiting.socketId !== socket.id) {
+         const roomId = `c4_${Math.random().toString(36).substring(7)}`;
+         socket.join(roomId);
+         io.sockets.sockets.get(c4Waiting.socketId)?.join(roomId);
+         activeRooms.set(roomId, {
+            gameType: "CONNECT4",
+            isPrivate: false,
+            players: [c4Waiting.socketId, socket.id],
+            playerDbIds: [c4Waiting.dbId, dbId],
+            board: createC4Board(),
+            turn: c4Waiting.socketId,
+            playerNames: [c4Waiting.username, username],
+         });
+         io.to(roomId).emit("c4_match_found", {
+            roomId,
+            board: activeRooms.get(roomId).board,
+            turn: c4Waiting.socketId,
+            players: [
+               {
+                  id: c4Waiting.socketId,
+                  name: c4Waiting.username,
+                  color: "YELLOW",
+               },
+               { id: socket.id, name: username, color: "RED" },
+            ],
+         });
+         c4Waiting = null;
+      } else {
+         c4Waiting = { socketId: socket.id, dbId, username };
+         socket.emit("c4_waiting");
+      }
+   });
+
+   socket.on("c4_create_private_room", (data) => {
+      const roomId = `c4pvp_${Math.random().toString(36).substring(7)}`;
+      const username = socket.data.username || data?.username || "Misafir";
+      const dbId = socket.data.dbId || socket.id;
+      socket.join(roomId);
+      activeRooms.set(roomId, {
+         gameType: "CONNECT4",
+         isPrivate: true,
+         players: [socket.id],
+         playerDbIds: [dbId],
+         playerNames: [username],
+         board: createC4Board(),
+         turn: null,
+      });
+      socket.emit("c4_private_room_created", { roomId });
+   });
+
+   socket.on("c4_join_private_room", (data) => {
+      const roomId = data?.roomId;
+      const room = activeRooms.get(roomId);
+      const username = socket.data.username || data?.username || "Misafir";
+      const dbId = socket.data.dbId || socket.id;
+      if (room && room.gameType === "CONNECT4" && room.isPrivate) {
+         // FIX: Çift istek koruması
+         if (room.players.includes(socket.id)) {
+            if (room.players.length === 2) {
+               socket.emit("c4_match_found", {
+                  roomId,
+                  board: room.board,
+                  turn: room.turn,
+                  players: [
+                     {
+                        id: room.players[0],
+                        name: room.playerNames[0],
+                        color: "YELLOW",
+                     },
+                     {
+                        id: room.players[1],
+                        name: room.playerNames[1],
+                        color: "RED",
+                     },
+                  ],
+               });
+            }
+            return;
+         }
+         if (room.players.length < 2) {
+            socket.join(roomId);
+            room.players.push(socket.id);
+            room.playerDbIds.push(dbId);
+            room.playerNames.push(username);
+            if (room.players.length === 2) {
+               room.turn = room.players[0];
+               io.to(roomId).emit("c4_match_found", {
+                  roomId,
+                  board: room.board,
+                  turn: room.turn,
+                  players: [
+                     {
+                        id: room.players[0],
+                        name: room.playerNames[0],
+                        color: "YELLOW",
+                     },
+                     {
+                        id: room.players[1],
+                        name: room.playerNames[1],
+                        color: "RED",
+                     },
+                  ],
+               });
+            }
+         } else {
+            socket.emit("room_error", { message: "Oda bulunamadı veya dolu." });
+         }
+      } else {
+         socket.emit("room_error", { message: "Oda bulunamadı veya dolu." });
+      }
+   });
+
    socket.on("disconnect", () => {
       if (waitingPlayer && waitingPlayer.socketId === socket.id)
          waitingPlayer = null;
       if (checkersWaitingPlayer && checkersWaitingPlayer.socketId === socket.id)
          checkersWaitingPlayer = null;
+      if (c4Waiting && c4Waiting.socketId === socket.id) c4Waiting = null;
    });
 });
 

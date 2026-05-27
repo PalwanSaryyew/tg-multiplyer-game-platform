@@ -22,9 +22,14 @@ export default function RPSGame() {
    useEffect(() => {
       if (!socket) return;
 
-      // Deep link kontrolü (Davet linkiyle geldiyse)
-      const checkDeepLink = async () => {
-         if (typeof window !== "undefined") {
+      // FIX: if-else yapısı ile eski deep link çakışmasını engelliyoruz
+      const checkLinks = async () => {
+         const urlParams = new URLSearchParams(window.location.search);
+         const roomQuery = urlParams.get("room");
+
+         if (roomQuery) {
+            socket.emit("join_private_room", { roomId: roomQuery });
+         } else if (typeof window !== "undefined") {
             const WebApp = (await import("@twa-dev/sdk")).default;
             const startParam = WebApp.initDataUnsafe?.start_param;
             if (startParam && startParam.startsWith("pvp_")) {
@@ -32,9 +37,10 @@ export default function RPSGame() {
             }
          }
       };
-      checkDeepLink();
+      checkLinks();
 
       socket.on("waiting_in_queue", () => setIsSearching(true));
+      // ... (Geri kalan tüm socket dinleyicileri eskisi gibi kalacak)
       socket.on("private_room_created", ({ roomId }) => setInviteCode(roomId));
 
       socket.on("room_error", ({ message }) => {
@@ -55,7 +61,6 @@ export default function RPSGame() {
       socket.on("opponent_played", () => setOpponentPlayed(true));
       socket.on("game_result", (data) => setResult(data));
 
-      // Ekrandan çıkarsa state'leri temizle dinleyicileri kaldır
       return () => {
          socket.off("waiting_in_queue");
          socket.off("private_room_created");
@@ -66,15 +71,11 @@ export default function RPSGame() {
       };
    }, [socket]);
 
-   const handleFindMatch = () => {
-      socket?.emit("find_match");
-   };
-   const handleCreatePrivateRoom = () => {
-      socket?.emit("create_private_room");
-   };
+   const handleFindMatch = () => socket?.emit("find_match");
+   const handleCreatePrivateRoom = () => socket?.emit("create_private_room");
    const handleJoinPrivateRoom = () => {
-      if (!joinCodeInput.trim()) return;
-      socket?.emit("join_private_room", { roomId: joinCodeInput.trim() });
+      if (joinCodeInput.trim())
+         socket?.emit("join_private_room", { roomId: joinCodeInput.trim() });
    };
 
    const playMove = (move: string) => {
@@ -116,7 +117,6 @@ export default function RPSGame() {
             )}
          </AnimatePresence>
 
-         {/* Geri Dön Butonu */}
          <div className="absolute top-4 left-4">
             <Link
                href="/"

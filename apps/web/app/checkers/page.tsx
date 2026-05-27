@@ -17,119 +17,107 @@ export default function CheckersGame() {
    const [winner, setWinner] = useState<string | null>(null);
    const [moveError, setMoveError] = useState<string | null>(null);
 
-   // --- DÜELLO STATE'LERİ ---
    const [inviteCode, setInviteCode] = useState<string | null>(null);
    const [showJoinInput, setShowJoinInput] = useState(false);
    const [joinCodeInput, setJoinCodeInput] = useState("");
 
-   useEffect(() => {
-      if (!socket) return;
+  useEffect(() => {
+     if (!socket) return;
 
-      // Telegram Botu üzerinden derin link (Deep Link) kontrolü
-      const checkDeepLink = async () => {
-         if (typeof window !== "undefined") {
-            const WebApp = (await import("@twa-dev/sdk")).default;
-            const startParam = WebApp.initDataUnsafe?.start_param;
-            if (startParam && startParam.startsWith("cpvp_")) {
-               socket.emit("checkers_join_private_room", {
-                  roomId: startParam,
-               });
-            }
-         }
-      };
-      checkDeepLink();
+     // FIX: if-else yapısı ile eski deep link çakışmasını engelliyoruz
+     const checkLinks = async () => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const roomQuery = urlParams.get("room");
 
-      socket.on("checkers_waiting_in_queue", () => setIsSearching(true));
+        if (roomQuery) {
+           socket.emit("checkers_join_private_room", { roomId: roomQuery });
+        } else if (typeof window !== "undefined") {
+           const WebApp = (await import("@twa-dev/sdk")).default;
+           const startParam = WebApp.initDataUnsafe?.start_param;
+           if (startParam && startParam.startsWith("cpvp_")) {
+              socket.emit("checkers_join_private_room", { roomId: startParam });
+           }
+        }
+     };
+     checkLinks();
 
-      // Düello odası başarıyla oluşturulduğunda kodu ekrana bas
-      socket.on("checkers_private_room_created", ({ roomId }) =>
-         setInviteCode(roomId),
-      );
+     socket.on("checkers_waiting_in_queue", () => setIsSearching(true));
+     // ... (Geri kalan tüm socket dinleyicileri eskisi gibi kalacak)
+     socket.on("checkers_private_room_created", ({ roomId }) =>
+        setInviteCode(roomId),
+     );
 
-      socket.on("checkers_room_error", (data) => {
-         setMoveError(data.message);
-         setTimeout(() => setMoveError(null), 3000);
-      });
+     socket.on("checkers_room_error", (data) => {
+        setMoveError(data.message);
+        setTimeout(() => setMoveError(null), 3000);
+     });
 
-      socket.on("checkers_match_found", (data) => {
-         setIsSearching(false);
-         setInviteCode(null);
-         setShowJoinInput(false);
-         setRoomData(data);
-         setBoard(data.board);
-         setTurn(data.turn);
-         setWinner(null);
-         setSelectedCell(null);
-         setMoveError(null);
+     socket.on("checkers_match_found", (data) => {
+        setIsSearching(false);
+        setInviteCode(null);
+        setShowJoinInput(false);
+        setRoomData(data);
+        setBoard(data.board);
+        setTurn(data.turn);
+        setWinner(null);
+        setSelectedCell(null);
+        setMoveError(null);
+        const me = data.players.find((p: any) => p.socketId === socket.id);
+        if (me) setMyColor(me.color);
+     });
 
-         const me = data.players.find((p: any) => p.socketId === socket.id);
-         if (me) setMyColor(me.color);
-      });
+     socket.on("checkers_board_updated", (data) => {
+        setBoard(data.board);
+        setTurn(data.turn);
+        setMoveError(null);
+        if (data.multiJumpIndex !== undefined && data.multiJumpIndex !== null)
+           setSelectedCell(data.multiJumpIndex);
+        else setSelectedCell(null);
+     });
 
-      socket.on("checkers_board_updated", (data) => {
-         setBoard(data.board);
-         setTurn(data.turn);
-         setMoveError(null);
-         if (
-            data.multiJumpIndex !== undefined &&
-            data.multiJumpIndex !== null
-         ) {
-            setSelectedCell(data.multiJumpIndex);
-         } else {
-            setSelectedCell(null);
-         }
-      });
+     socket.on("checkers_game_over", (data) => {
+        setBoard(data.board);
+        setWinner(data.winner);
+        setSelectedCell(null);
+     });
 
-      socket.on("checkers_game_over", (data) => {
-         setBoard(data.board);
-         setWinner(data.winner);
-         setSelectedCell(null);
-      });
+     socket.on("checkers_invalid_move", (data) => {
+        if (data?.reason === "MUST_CAPTURE") {
+           setSelectedCell(null);
+           setMoveError("Yiyebileceğin bir taş varken başka hamle yapamazsın!");
+        } else if (data?.reason === "MUST_CONTINUE_JUMP")
+           setMoveError(
+              "Seri yeme devam ediyor! Sadece işaretli taşı oynayabilirsin.",
+           );
+        else setSelectedCell(null);
+        setTimeout(() => setMoveError(null), 3000);
+     });
 
-      socket.on("checkers_invalid_move", (data) => {
-         if (data?.reason === "MUST_CAPTURE") {
-            setSelectedCell(null);
-            setMoveError(
-               "Yiyebileceğin bir taş varken başka hamle yapamazsın!",
-            );
-         } else if (data?.reason === "MUST_CONTINUE_JUMP") {
-            setMoveError(
-               "Seri yeme devam ediyor! Sadece işaretli taşı oynayabilirsin.",
-            );
-         } else {
-            setSelectedCell(null);
-         }
-         setTimeout(() => setMoveError(null), 3000);
-      });
+     return () => {
+        socket.off("checkers_waiting_in_queue");
+        socket.off("checkers_private_room_created");
+        socket.off("checkers_room_error");
+        socket.off("checkers_match_found");
+        socket.off("checkers_board_updated");
+        socket.off("checkers_game_over");
+        socket.off("checkers_invalid_move");
+     };
+  }, [socket]);
 
-      return () => {
-         socket.off("checkers_waiting_in_queue");
-         socket.off("checkers_private_room_created");
-         socket.off("checkers_room_error");
-         socket.off("checkers_match_found");
-         socket.off("checkers_board_updated");
-         socket.off("checkers_game_over");
-         socket.off("checkers_invalid_move");
-      };
-   }, [socket]);
-
-   const handleFindMatch = () => {
-      socket?.emit("checkers_find_match");
-   };
-   const handleCreatePrivateRoom = () => {
+   const handleFindMatch = () => socket?.emit("checkers_find_match");
+   const handleCreatePrivateRoom = () =>
       socket?.emit("checkers_create_private_room");
-   };
    const handleJoinPrivateRoom = () => {
-      if (!joinCodeInput.trim()) return;
-      socket?.emit("checkers_join_private_room", {
-         roomId: joinCodeInput.trim(),
-      });
+      if (joinCodeInput.trim())
+         socket?.emit("checkers_join_private_room", {
+            roomId: joinCodeInput.trim(),
+         });
    };
 
    const shareToTelegram = async () => {
       if (!inviteCode) return;
       const shareUrl = `https://t.me/${process.env.NEXT_PUBLIC_TG_BOT}/${process.env.NEXT_PUBLIC_TG_APP}?startapp=${inviteCode}`;
-      const text = `Seni canlı Dama (Checkers) düellosuna davet ediyorum! Bakalım beni yenebilecek misin? ⚔️`;
+      const text = `Seni canlı Dama düellosuna davet ediyorum! Bakalım beni yenebilecek misin? ⚔️`;
       if (typeof window !== "undefined") {
          const WebApp = (await import("@twa-dev/sdk")).default;
          WebApp.openTelegramLink(
@@ -140,7 +128,6 @@ export default function CheckersGame() {
 
    const handleCellClick = (index: number) => {
       if (!socket || !roomData || winner || turn !== socket.id) return;
-
       if (
          roomData.multiJumpIndex !== null &&
          roomData.multiJumpIndex !== undefined
@@ -153,7 +140,6 @@ export default function CheckersGame() {
             return;
          }
       }
-
       const cellValue = board[index];
       if (
          (myColor === "RED" && (cellValue === 1 || cellValue === 3)) ||
@@ -184,7 +170,6 @@ export default function CheckersGame() {
                ⬅ Ana Menü
             </Link>
          </div>
-
          <AnimatePresence>
             {moveError && (
                <motion.div
@@ -226,7 +211,6 @@ export default function CheckersGame() {
                               ? "Rakip Aranıyor..."
                               : "🎲 Rastgele Maç Ara"}
                         </button>
-
                         {!isSearching && (
                            <div className="flex gap-2 w-full">
                               <button
@@ -247,7 +231,6 @@ export default function CheckersGame() {
                               </button>
                            </div>
                         )}
-
                         {showJoinInput && !isSearching && (
                            <motion.div
                               initial={{ opacity: 0, height: 0 }}
@@ -330,7 +313,6 @@ export default function CheckersGame() {
                            ⚪ {roomData.players[1].username}
                         </span>
                      </div>
-
                      <h3 className="text-sm font-semibold mb-4 text-zinc-300">
                         {winner
                            ? winner === socket?.id
@@ -340,25 +322,19 @@ export default function CheckersGame() {
                              ? "🟢 Senin Sıran!"
                              : "⏳ Rakibin Sırası..."}
                      </h3>
-
                      <div className="grid grid-cols-8 gap-0 border-2 border-zinc-700 rounded-lg overflow-hidden w-full aspect-square bg-zinc-950 shadow-2xl relative">
                         {displayIndices.map((actualIndex) => {
                            const cell = board[actualIndex];
                            const row = Math.floor(actualIndex / 8);
                            const col = actualIndex % 8;
                            const isDarkSquare = (row + col) % 2 === 1;
-
                            return (
                               <div
                                  key={actualIndex}
                                  onClick={() =>
                                     isDarkSquare && handleCellClick(actualIndex)
                                  }
-                                 className={`w-full h-full flex items-center justify-center relative aspect-square transition-all ${
-                                    isDarkSquare
-                                       ? "bg-zinc-800 cursor-pointer hover:bg-zinc-700/50"
-                                       : "bg-zinc-200"
-                                 } ${selectedCell === actualIndex ? "ring-4 ring-purple-500 ring-inset bg-zinc-700" : ""}`}
+                                 className={`w-full h-full flex items-center justify-center relative aspect-square transition-all ${isDarkSquare ? "bg-zinc-800 cursor-pointer hover:bg-zinc-700/50" : "bg-zinc-200"} ${selectedCell === actualIndex ? "ring-4 ring-purple-500 ring-inset bg-zinc-700" : ""}`}
                               >
                                  {(cell === 1 || cell === 3) && (
                                     <motion.div
@@ -388,7 +364,6 @@ export default function CheckersGame() {
                            );
                         })}
                      </div>
-
                      {winner && (
                         <button
                            onClick={() => setRoomData(null)}
