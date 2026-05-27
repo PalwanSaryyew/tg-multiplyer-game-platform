@@ -5,8 +5,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSocket } from "../providers/SocketProvider";
+import { useLanguage } from "@/providers/LanguageProvider";
 
 export default function Home() {
+   const { t, language, setLanguage } = useLanguage();
    const { socket, user, dbUser, isConnected } = useSocket();
    const router = useRouter();
 
@@ -20,7 +22,6 @@ export default function Home() {
 
    const deepLinkChecked = useRef(false);
 
-   // YENI: Kullanıcının Telegram'daki Adını ve Soyadını birleştiriyoruz
    const telegramFullName =
       `${user?.first_name || ""} ${user?.last_name || ""}`.trim();
    const displayName = telegramFullName || user?.username || "Oyuncu";
@@ -36,7 +37,6 @@ export default function Home() {
             const WebApp = (await import("@twa-dev/sdk")).default;
             const startParam = WebApp.initDataUnsafe?.start_param;
             if (startParam && startParam.startsWith("lobby_")) {
-               // Username yerine displayName gönderiyoruz
                socket.emit("join_hub_lobby", {
                   lobbyId: startParam,
                   username: displayName,
@@ -83,9 +83,9 @@ export default function Home() {
       setShowLeaderboard(!showLeaderboard);
    };
 
-   // Lobi fonksiyonlarında displayName kullanıyoruz
    const handleCreateLobby = () =>
       socket?.emit("create_hub_lobby", { username: displayName });
+
    const handleJoinLobby = () => {
       if (lobbyJoinCode.trim())
          socket?.emit("join_hub_lobby", {
@@ -93,6 +93,7 @@ export default function Home() {
             username: displayName,
          });
    };
+
    const handleLeaveLobby = () => {
       if (hubLobby)
          socket?.emit("leave_hub_lobby", { lobbyId: hubLobby.lobbyId });
@@ -121,25 +122,40 @@ export default function Home() {
 
    return (
       <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-zinc-950 text-white font-sans overflow-hidden">
-         <AnimatePresence>
-            {lobbyError && (
-               <motion.div
-                  initial={{ opacity: 0, y: -50 }}
-                  animate={{ opacity: 1, y: 10 }}
-                  exit={{ opacity: 0, y: -50 }}
-                  className="absolute top-4 bg-red-500 text-white px-4 py-2 rounded-lg shadow-lg font-medium z-50"
-               >
-                  {lobbyError}
-               </motion.div>
-            )}
-         </AnimatePresence>
+         {/* DİL DEĞİŞTİRİCİ BUTONLAR */}
+         <div className="absolute top-4 right-4 flex gap-2">
+            <button
+               onClick={() => setLanguage("tk")}
+               className={`px-2 py-1 text-xs rounded ${language === "tk" ? "bg-purple-600" : "bg-zinc-800"}`}
+            >
+               TK
+            </button>
+            <button
+               onClick={() => setLanguage("tr")}
+               className={`px-2 py-1 text-xs rounded ${language === "tr" ? "bg-purple-600" : "bg-zinc-800"}`}
+            >
+               TR
+            </button>
+            <button
+               onClick={() => setLanguage("ru")}
+               className={`px-2 py-1 text-xs rounded ${language === "ru" ? "bg-purple-600" : "bg-zinc-800"}`}
+            >
+               RU
+            </button>
+            <button
+               onClick={() => setLanguage("en")}
+               className={`px-2 py-1 text-xs rounded ${language === "en" ? "bg-purple-600" : "bg-zinc-800"}`}
+            >
+               EN
+            </button>
+         </div>
 
          <motion.h1
             initial={{ y: -50, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             className="text-3xl font-bold mb-6 text-center"
          >
-            Nexus Space Hub
+            {t.hub.title}
          </motion.h1>
 
          <motion.div
@@ -157,7 +173,7 @@ export default function Home() {
                   >
                      <div className="mb-6 bg-zinc-950 p-4 rounded-xl border border-zinc-800">
                         <h3 className="text-sm font-bold text-zinc-400 mb-3 text-center">
-                           🎮 Arkadaşınla Oyna
+                           {t.hub.playWithFriend}
                         </h3>
                         <div className="flex gap-2">
                            <button
@@ -165,14 +181,14 @@ export default function Home() {
                               disabled={!isConnected}
                               className="flex-1 bg-purple-600 hover:bg-purple-500 text-white py-2 rounded-lg font-bold text-sm transition-colors"
                            >
-                              Lobi Kur
+                              {t.hub.createLobby}
                            </button>
                            <button
                               onClick={() => setShowLobbyJoin(!showLobbyJoin)}
                               disabled={!isConnected}
                               className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white py-2 rounded-lg font-bold text-sm transition-colors border border-zinc-700"
                            >
-                              Lobiye Katıl
+                              {t.hub.joinLobby}
                            </button>
                         </div>
                         {showLobbyJoin && (
@@ -183,7 +199,7 @@ export default function Home() {
                            >
                               <input
                                  type="text"
-                                 placeholder="Kodu yapıştır (lobby_...)"
+                                 placeholder="lobby_..."
                                  value={lobbyJoinCode}
                                  onChange={(e) =>
                                     setLobbyJoinCode(e.target.value)
@@ -194,7 +210,7 @@ export default function Home() {
                                  onClick={handleJoinLobby}
                                  className="bg-purple-600 hover:bg-purple-500 px-4 rounded-lg font-bold text-sm"
                               >
-                                 Git
+                                 {t.common.go}
                               </button>
                            </motion.div>
                         )}
@@ -202,7 +218,7 @@ export default function Home() {
 
                      <div className="space-y-3">
                         <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">
-                           Hızlı Giriş (Solo)
+                           {t.hub.fastJoin}
                         </h3>
                         <Link
                            href="/rps"
@@ -211,10 +227,10 @@ export default function Home() {
                            <div className="flex justify-between items-center">
                               <div>
                                  <h4 className="font-bold text-lg text-white group-hover:text-blue-400 transition-colors">
-                                    ✊✋✌️ T.K.M.
+                                    {t.games.rps}
                                  </h4>
                                  <p className="text-xs text-zinc-400 mt-1">
-                                    Klasik 1v1 Düello
+                                    {t.games.rpsDesc}
                                  </p>
                               </div>
                            </div>
@@ -226,10 +242,10 @@ export default function Home() {
                            <div className="flex justify-between items-center">
                               <div>
                                  <h4 className="font-bold text-lg text-white group-hover:text-purple-400 transition-colors">
-                                    🏁 Dama (Checkers)
+                                    {t.games.checkers}
                                  </h4>
                                  <p className="text-xs text-zinc-400 mt-1">
-                                    Sıra Tabanlı Strateji
+                                    {t.games.checkersDesc}
                                  </p>
                               </div>
                            </div>
@@ -241,10 +257,10 @@ export default function Home() {
                            <div className="flex justify-between items-center">
                               <div>
                                  <h4 className="font-bold text-lg text-white group-hover:text-yellow-400 transition-colors">
-                                    🟡🔴 Hedef 4
+                                    {t.games.connect4}
                                  </h4>
                                  <p className="text-xs text-zinc-400 mt-1">
-                                    Stratejik Disk Atma
+                                    {t.games.connect4Desc}
                                  </p>
                               </div>
                            </div>
@@ -259,7 +275,7 @@ export default function Home() {
                      className="flex flex-col text-center"
                   >
                      <h2 className="text-xl font-bold mb-2 text-purple-400">
-                        Merkez Lobi
+                        {t.lobby.masterLobby}
                      </h2>
                      <p className="text-xs text-zinc-500 mb-4 font-mono select-all bg-zinc-950 py-1 rounded border border-zinc-800">
                         {hubLobby.lobbyId}
@@ -275,7 +291,7 @@ export default function Home() {
                            </span>
                         </div>
                         <span className="text-zinc-600 font-bold text-xl">
-                           VS
+                           {t.common.vs}
                         </span>
                         <div className="flex flex-col items-center">
                            <div
@@ -286,7 +302,7 @@ export default function Home() {
                            <span className="text-sm font-bold text-zinc-400">
                               {hubLobby.players[1]
                                  ? hubLobby.players[1].username
-                                 : "Bekleniyor..."}
+                                 : t.lobby.waiting}
                            </span>
                         </div>
                      </div>
@@ -296,7 +312,7 @@ export default function Home() {
                            onClick={shareLobbyToTelegram}
                            className="w-full py-3 mb-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold text-sm transition-colors"
                         >
-                           Arkadaşını Davet Et (Telegram)
+                           {t.lobby.inviteFriend}
                         </button>
                      )}
 
@@ -305,31 +321,31 @@ export default function Home() {
                            {hubLobby.players[0].socketId === socket?.id ? (
                               <div className="space-y-2">
                                  <h3 className="text-sm font-bold text-zinc-300 mb-3">
-                                    Bir Oyun Seç:
+                                    {t.lobby.chooseGame}
                                  </h3>
                                  <button
                                     onClick={() => launchGame("RPS")}
                                     className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg font-bold text-sm"
                                  >
-                                    ✊✋✌️ Taş-Kağıt-Makas
+                                    {t.games.rpsTitle}
                                  </button>
                                  <button
                                     onClick={() => launchGame("CHECKERS")}
                                     className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg font-bold text-sm"
                                  >
-                                    🏁 Dama
+                                    {t.games.checkersTitle}
                                  </button>
                                  <button
                                     onClick={() => launchGame("CONNECT4")}
                                     className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg font-bold text-sm"
                                  >
-                                    🟡🔴 Hedef 4
+                                    {t.games.connect4Title}
                                  </button>
                               </div>
                            ) : (
                               <div className="py-6 border border-zinc-800 border-dashed rounded-lg">
                                  <p className="text-sm text-zinc-400 animate-pulse">
-                                    Kurucu oyun seçiyor...
+                                    {t.lobby.hostChoosing}
                                  </p>
                               </div>
                            )}
@@ -340,18 +356,18 @@ export default function Home() {
                         onClick={handleLeaveLobby}
                         className="text-xs text-red-500 hover:text-red-400 underline mt-2"
                      >
-                        Lobiden Ayrıl
+                        {t.lobby.leave}
                      </button>
                   </motion.div>
                )}
             </AnimatePresence>
 
             <div className="mt-6 pt-4 border-t border-zinc-800 flex items-center justify-between">
-               <span className="text-sm text-zinc-400">Durum:</span>
+               <span className="text-sm text-zinc-400">{t.hub.status}</span>
                <span
                   className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${isConnected ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}
                >
-                  {isConnected ? "Bağlı 🟢" : "Bekleniyor 🔴"}
+                  {isConnected ? t.hub.statusConnected : t.hub.statusWaiting}
                </span>
             </div>
          </motion.div>

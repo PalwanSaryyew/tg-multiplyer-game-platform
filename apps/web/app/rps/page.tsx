@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { useSocket } from "../../providers/SocketProvider";
+import { useLanguage } from "../../providers/LanguageProvider"; // YENİ
 
 export default function RPSGame() {
+   const { t } = useLanguage(); // YENİ
    const { socket, user, isConnected } = useSocket();
    const [isSearching, setIsSearching] = useState(false);
    const [roomData, setRoomData] = useState<any>(null);
@@ -21,8 +23,6 @@ export default function RPSGame() {
 
    useEffect(() => {
       if (!socket) return;
-
-      // FIX: if-else yapısı ile eski deep link çakışmasını engelliyoruz
       const checkLinks = async () => {
          const urlParams = new URLSearchParams(window.location.search);
          const roomQuery = urlParams.get("room");
@@ -40,7 +40,6 @@ export default function RPSGame() {
       checkLinks();
 
       socket.on("waiting_in_queue", () => setIsSearching(true));
-      // ... (Geri kalan tüm socket dinleyicileri eskisi gibi kalacak)
       socket.on("private_room_created", ({ roomId }) => setInviteCode(roomId));
 
       socket.on("room_error", ({ message }) => {
@@ -87,7 +86,7 @@ export default function RPSGame() {
    const shareToTelegram = async () => {
       if (!inviteCode) return;
       const shareUrl = `https://t.me/${process.env.NEXT_PUBLIC_TG_BOT}/${process.env.NEXT_PUBLIC_TG_APP}?startapp=${inviteCode}`;
-      const text = `Seni Taş-Kağıt-Makas düellosuna davet ediyorum! Gel kapışalım ⚔️`;
+      const text = t.rps.shareText;
       if (typeof window !== "undefined") {
          const WebApp = (await import("@twa-dev/sdk")).default;
          WebApp.openTelegramLink(
@@ -98,8 +97,8 @@ export default function RPSGame() {
 
    const getResultMessage = () => {
       if (!result || !socket) return null;
-      if (result.winner === "DRAW") return "Berabere! 🤝";
-      return result.winner === socket.id ? "Kazandın! 🎉" : "Kaybettin! 💀";
+      if (result.winner === "DRAW") return t.common.draw;
+      return result.winner === socket.id ? t.common.youWin : t.common.youLose;
    };
 
    return (
@@ -122,7 +121,7 @@ export default function RPSGame() {
                href="/"
                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-sm font-bold transition-colors"
             >
-               ⬅ Ana Menü
+               {t.common.mainMenu}
             </Link>
          </div>
 
@@ -132,7 +131,7 @@ export default function RPSGame() {
             className="bg-zinc-900 p-6 rounded-xl shadow-lg border border-zinc-800 w-full max-w-sm relative mt-12"
          >
             <h2 className="text-xl font-bold mb-6 text-center border-b border-zinc-800 pb-4">
-               Taş-Kağıt-Makas
+               {t.games.rpsTitle}
             </h2>
 
             <div className="min-h-[220px] flex flex-col justify-center">
@@ -152,8 +151,8 @@ export default function RPSGame() {
                               className={`w-full py-3 rounded-lg font-bold transition-colors ${isSearching ? "bg-blue-600 animate-pulse text-white" : !isConnected ? "bg-zinc-700 text-zinc-500" : "bg-green-600 hover:bg-green-500 text-white"}`}
                            >
                               {isSearching
-                                 ? "Rakip Aranıyor..."
-                                 : "🎲 Rastgele Eşleşme (1v1)"}
+                                 ? t.common.searching
+                                 : t.common.randomMatch}
                            </button>
 
                            {!isSearching && (
@@ -163,7 +162,7 @@ export default function RPSGame() {
                                     disabled={!isConnected}
                                     className="flex-1 py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-bold transition-colors"
                                  >
-                                    ⚔️ Düello Kur
+                                    {t.common.createDuel}
                                  </button>
                                  <button
                                     onClick={() =>
@@ -172,7 +171,7 @@ export default function RPSGame() {
                                     disabled={!isConnected}
                                     className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white rounded-lg font-bold transition-colors"
                                  >
-                                    Katıl
+                                    {t.common.join}
                                  </button>
                               </div>
                            )}
@@ -185,7 +184,7 @@ export default function RPSGame() {
                               >
                                  <input
                                     type="text"
-                                    placeholder="Oda Kodu (pvp_...)"
+                                    placeholder={t.rps.roomCodePlaceholder}
                                     value={joinCodeInput}
                                     onChange={(e) =>
                                        setJoinCodeInput(e.target.value)
@@ -196,7 +195,7 @@ export default function RPSGame() {
                                     onClick={handleJoinPrivateRoom}
                                     className="bg-purple-600 hover:bg-purple-500 px-4 rounded-lg font-bold"
                                  >
-                                    Git
+                                    {t.common.go}
                                  </button>
                               </motion.div>
                            )}
@@ -209,10 +208,10 @@ export default function RPSGame() {
                            className="text-center bg-zinc-800 p-4 rounded-lg border border-purple-500/50"
                         >
                            <h3 className="text-purple-400 font-bold mb-2">
-                              ⚔️ Odan Hazır!
+                              {t.common.roomReady}
                            </h3>
                            <p className="text-sm text-zinc-400 mb-4">
-                              Arkadaşını davet et veya kodu gönder.
+                              {t.common.inviteFriendDesc}
                            </p>
                            <div className="bg-zinc-950 p-3 rounded-lg mb-4 select-all font-mono text-sm border border-zinc-700">
                               {inviteCode}
@@ -222,13 +221,13 @@ export default function RPSGame() {
                                  onClick={shareToTelegram}
                                  className="flex-1 bg-blue-600 hover:bg-blue-500 py-2 rounded-lg font-bold text-sm"
                               >
-                                 Telegram'da Paylaş
+                                 {t.common.shareTelegram}
                               </button>
                               <button
                                  onClick={() => setInviteCode(null)}
                                  className="px-4 bg-zinc-700 hover:bg-zinc-600 rounded-lg font-bold text-sm"
                               >
-                                 İptal
+                                 {t.common.cancel}
                               </button>
                            </div>
                         </motion.div>
@@ -244,7 +243,7 @@ export default function RPSGame() {
                            <span className="text-blue-400">
                               {roomData.players[0].username}
                            </span>
-                           <span className="text-zinc-500">vs</span>
+                           <span className="text-zinc-500">{t.common.vs}</span>
                            <span className="text-red-400">
                               {roomData.players[1].username}
                            </span>
@@ -259,7 +258,7 @@ export default function RPSGame() {
                                  exit={{ opacity: 0, x: -20 }}
                               >
                                  <p className="text-zinc-300 mb-4">
-                                    Seçimini yap:
+                                    {t.rps.makeChoice}
                                  </p>
                                  <div className="flex justify-center gap-6">
                                     {["ROCK", "PAPER", "SCISSORS"].map(
@@ -292,13 +291,13 @@ export default function RPSGame() {
                                  >
                                     {myMove &&
                                        !opponentPlayed &&
-                                       "Rakip bekleniyor..."}
+                                       t.rps.waitingOpponent}
                                     {!myMove &&
                                        opponentPlayed &&
-                                       "Rakip seçimini yaptı!"}
+                                       t.rps.opponentPlayed}
                                     {myMove &&
                                        opponentPlayed &&
-                                       "Hesaplanıyor..."}
+                                       t.rps.calculating}
                                  </motion.div>
                               </motion.div>
                            ) : (
@@ -315,7 +314,9 @@ export default function RPSGame() {
                                  </h3>
                                  <div className="flex justify-center items-center gap-8 text-zinc-400 text-sm mb-6 bg-zinc-900/50 p-3 rounded-lg">
                                     <div className="flex flex-col items-center">
-                                       <span className="mb-1">Sen</span>
+                                       <span className="mb-1">
+                                          {t.common.you}
+                                       </span>
                                        <span className="text-3xl">
                                           {result.moves[socket?.id || ""] ===
                                           "ROCK"
@@ -329,7 +330,9 @@ export default function RPSGame() {
                                     </div>
                                     <div className="text-lg font-bold">VS</div>
                                     <div className="flex flex-col items-center">
-                                       <span className="mb-1">Rakip</span>
+                                       <span className="mb-1">
+                                          {t.common.opponent}
+                                       </span>
                                        <span className="text-3xl">
                                           {Object.entries(result.moves).find(
                                              ([id]) => id !== socket?.id,
@@ -355,7 +358,7 @@ export default function RPSGame() {
                                     }}
                                     className="w-full py-3 bg-zinc-700 hover:bg-zinc-600 rounded-lg text-white font-bold transition-colors shadow-lg"
                                  >
-                                    Odadan Çık
+                                    {t.common.leaveRoom}
                                  </motion.button>
                               </motion.div>
                            )}

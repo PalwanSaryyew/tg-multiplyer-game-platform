@@ -3,6 +3,7 @@ import { Geist, Geist_Mono, Montserrat } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { SocketProvider } from "@/providers/SocketProvider";
+import { LanguageProvider } from "@/providers/LanguageProvider";
 
 const montserrat = Montserrat({ subsets: ["latin"], variable: "--font-sans" });
 
@@ -39,7 +40,9 @@ export default function RootLayout({
          )}
       >
          <body>
-            <SocketProvider>{children}</SocketProvider>
+            <LanguageProvider>
+               <SocketProvider>{children}</SocketProvider>
+            </LanguageProvider>
          </body>
       </html>
    );

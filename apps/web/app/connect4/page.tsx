@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { useSocket } from "../../providers/SocketProvider";
+import { useLanguage } from "../../providers/LanguageProvider"; // YENİ
 
 export default function Connect4() {
+   const { t } = useLanguage(); // YENİ
    const { socket, isConnected } = useSocket();
    const [room, setRoom] = useState<any>(null);
    const [isSearching, setIsSearching] = useState(false);
@@ -21,8 +23,6 @@ export default function Connect4() {
 
    useEffect(() => {
       if (!socket) return;
-
-      // FIX: if-else yapısı ile eski deep link çakışmasını engelliyoruz
       const checkLinks = async () => {
          const urlParams = new URLSearchParams(window.location.search);
          const roomQuery = urlParams.get("room");
@@ -40,7 +40,6 @@ export default function Connect4() {
       checkLinks();
 
       socket.on("c4_waiting", () => setIsSearching(true));
-      // ... (Geri kalan tüm socket dinleyicileri eskisi gibi kalacak)
       socket.on("c4_private_room_created", ({ roomId }) =>
          setInviteCode(roomId),
       );
@@ -90,7 +89,7 @@ export default function Connect4() {
    const shareToTelegram = async () => {
       if (!inviteCode) return;
       const shareUrl = `https://t.me/${process.env.NEXT_PUBLIC_TG_BOT}/${process.env.NEXT_PUBLIC_TG_APP}?startapp=${inviteCode}`;
-      const text = `Seni Hedef 4 düellosuna davet ediyorum! Gel kapışalım ⚔️`;
+      const text = t.connect4.shareText;
       if (typeof window !== "undefined") {
          const WebApp = (await import("@twa-dev/sdk")).default;
          WebApp.openTelegramLink(
@@ -110,7 +109,7 @@ export default function Connect4() {
             href="/"
             className="absolute top-4 left-4 bg-zinc-800 px-4 py-2 rounded-lg text-sm font-bold"
          >
-            ⬅ Hub
+            {t.common.mainMenu}
          </Link>
 
          <AnimatePresence>
@@ -132,7 +131,7 @@ export default function Connect4() {
             className="bg-zinc-900 p-4 rounded-2xl border border-zinc-800 w-full max-w-sm mt-8"
          >
             <h2 className="text-xl font-bold mb-4 text-center">
-               🟡 Connect Four 🔴
+               {t.games.connect4Title}
             </h2>
 
             <AnimatePresence mode="wait">
@@ -151,8 +150,8 @@ export default function Connect4() {
                            className={`w-full py-3 rounded-lg font-bold transition-colors ${isSearching ? "bg-blue-600 animate-pulse text-white" : !isConnected ? "bg-zinc-700 text-zinc-500" : "bg-purple-600 hover:bg-purple-500 text-white"}`}
                         >
                            {isSearching
-                              ? "Rakip Aranıyor..."
-                              : "🎲 Rastgele Eşleşme"}
+                              ? t.common.searching
+                              : t.common.randomMatch}
                         </button>
 
                         {!isSearching && (
@@ -162,7 +161,7 @@ export default function Connect4() {
                                  disabled={!isConnected}
                                  className="flex-1 py-3 bg-yellow-600 hover:bg-yellow-500 text-white rounded-lg font-bold transition-colors"
                               >
-                                 ⚔️ Düello Kur
+                                 {t.common.createDuel}
                               </button>
                               <button
                                  onClick={() =>
@@ -171,7 +170,7 @@ export default function Connect4() {
                                  disabled={!isConnected}
                                  className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white rounded-lg font-bold transition-colors"
                               >
-                                 Katıl
+                                 {t.common.join}
                               </button>
                            </div>
                         )}
@@ -184,7 +183,7 @@ export default function Connect4() {
                            >
                               <input
                                  type="text"
-                                 placeholder="Oda Kodu (c4pvp_...)"
+                                 placeholder={t.connect4.roomCodePlaceholder}
                                  value={joinCodeInput}
                                  onChange={(e) =>
                                     setJoinCodeInput(e.target.value)
@@ -195,7 +194,7 @@ export default function Connect4() {
                                  onClick={handleJoinPrivateRoom}
                                  className="bg-yellow-600 hover:bg-yellow-500 px-4 rounded-lg font-bold"
                               >
-                                 Git
+                                 {t.common.go}
                               </button>
                            </motion.div>
                         )}
@@ -208,10 +207,10 @@ export default function Connect4() {
                         className="text-center bg-zinc-800 p-4 rounded-lg border border-yellow-500/50"
                      >
                         <h3 className="text-yellow-400 font-bold mb-2">
-                           ⚔️ Odan Hazır!
+                           {t.common.roomReady}
                         </h3>
                         <p className="text-sm text-zinc-400 mb-4">
-                           Arkadaşını davet et veya kodu gönder.
+                           {t.common.inviteFriendDesc}
                         </p>
                         <div className="bg-zinc-950 p-3 rounded-lg mb-4 select-all font-mono text-sm border border-zinc-700">
                            {inviteCode}
@@ -221,13 +220,13 @@ export default function Connect4() {
                               onClick={shareToTelegram}
                               className="flex-1 bg-blue-600 hover:bg-blue-500 py-2 rounded-lg font-bold text-sm"
                            >
-                              Telegram'da Paylaş
+                              {t.common.shareTelegram}
                            </button>
                            <button
                               onClick={() => setInviteCode(null)}
                               className="px-4 bg-zinc-700 hover:bg-zinc-600 rounded-lg font-bold text-sm"
                            >
-                              İptal
+                              {t.common.cancel}
                            </button>
                         </div>
                      </motion.div>
@@ -245,24 +244,24 @@ export default function Connect4() {
                               myColor === "YELLOW" ? "text-yellow-400" : ""
                            }
                         >
-                           Sarı: {room.players[0].name}
+                           {t.connect4.yellow}: {room.players[0].name}
                         </span>
                         <span
                            className={myColor === "RED" ? "text-red-400" : ""}
                         >
-                           Kırmızı: {room.players[1].name}
+                           {t.connect4.red}: {room.players[1].name}
                         </span>
                      </div>
                      <p className="mb-4 font-bold">
                         {winner
                            ? winner === "DRAW"
-                              ? "Berabere! 🤝"
+                              ? t.common.draw
                               : winner === socket?.id
-                                ? "🎉 Kazandın!"
-                                : "💀 Kaybettin!"
+                                ? t.common.youWin
+                                : t.common.youLose
                            : turn === socket?.id
-                             ? "🟢 Senin Sıran"
-                             : "⏳ Bekle..."}
+                             ? t.common.yourTurn
+                             : t.common.opponentsTurn}
                      </p>
                      <div className="bg-blue-700 p-2 rounded-xl shadow-2xl grid grid-cols-7 gap-2 relative border-4 border-blue-800">
                         {Array.from({ length: 7 }).map((_, colIndex) => (
@@ -309,7 +308,7 @@ export default function Connect4() {
                            onClick={() => setRoom(null)}
                            className="mt-6 w-full py-2 bg-zinc-800 rounded-lg"
                         >
-                           Menüye Dön
+                           {t.common.backToMenu}
                         </button>
                      )}
                   </motion.div>

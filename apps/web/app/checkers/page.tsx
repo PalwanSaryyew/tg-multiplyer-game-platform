@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { useSocket } from "../../providers/SocketProvider";
+import { useLanguage } from "../../providers/LanguageProvider"; // YENİ
 
 export default function CheckersGame() {
+   const { t } = useLanguage(); // YENİ
    const { socket, isConnected } = useSocket();
    const [isSearching, setIsSearching] = useState(false);
    const [roomData, setRoomData] = useState<any>(null);
@@ -21,88 +23,86 @@ export default function CheckersGame() {
    const [showJoinInput, setShowJoinInput] = useState(false);
    const [joinCodeInput, setJoinCodeInput] = useState("");
 
-  useEffect(() => {
-     if (!socket) return;
+   useEffect(() => {
+      if (!socket) return;
+      const checkLinks = async () => {
+         const urlParams = new URLSearchParams(window.location.search);
+         const roomQuery = urlParams.get("room");
 
-     // FIX: if-else yapısı ile eski deep link çakışmasını engelliyoruz
-     const checkLinks = async () => {
-        const urlParams = new URLSearchParams(window.location.search);
-        const roomQuery = urlParams.get("room");
+         if (roomQuery) {
+            socket.emit("checkers_join_private_room", { roomId: roomQuery });
+         } else if (typeof window !== "undefined") {
+            const WebApp = (await import("@twa-dev/sdk")).default;
+            const startParam = WebApp.initDataUnsafe?.start_param;
+            if (startParam && startParam.startsWith("cpvp_")) {
+               socket.emit("checkers_join_private_room", {
+                  roomId: startParam,
+               });
+            }
+         }
+      };
+      checkLinks();
 
-        if (roomQuery) {
-           socket.emit("checkers_join_private_room", { roomId: roomQuery });
-        } else if (typeof window !== "undefined") {
-           const WebApp = (await import("@twa-dev/sdk")).default;
-           const startParam = WebApp.initDataUnsafe?.start_param;
-           if (startParam && startParam.startsWith("cpvp_")) {
-              socket.emit("checkers_join_private_room", { roomId: startParam });
-           }
-        }
-     };
-     checkLinks();
+      socket.on("checkers_waiting_in_queue", () => setIsSearching(true));
+      socket.on("checkers_private_room_created", ({ roomId }) =>
+         setInviteCode(roomId),
+      );
 
-     socket.on("checkers_waiting_in_queue", () => setIsSearching(true));
-     // ... (Geri kalan tüm socket dinleyicileri eskisi gibi kalacak)
-     socket.on("checkers_private_room_created", ({ roomId }) =>
-        setInviteCode(roomId),
-     );
+      socket.on("checkers_room_error", (data) => {
+         setMoveError(data.message);
+         setTimeout(() => setMoveError(null), 3000);
+      });
 
-     socket.on("checkers_room_error", (data) => {
-        setMoveError(data.message);
-        setTimeout(() => setMoveError(null), 3000);
-     });
+      socket.on("checkers_match_found", (data) => {
+         setIsSearching(false);
+         setInviteCode(null);
+         setShowJoinInput(false);
+         setRoomData(data);
+         setBoard(data.board);
+         setTurn(data.turn);
+         setWinner(null);
+         setSelectedCell(null);
+         setMoveError(null);
+         const me = data.players.find((p: any) => p.socketId === socket.id);
+         if (me) setMyColor(me.color);
+      });
 
-     socket.on("checkers_match_found", (data) => {
-        setIsSearching(false);
-        setInviteCode(null);
-        setShowJoinInput(false);
-        setRoomData(data);
-        setBoard(data.board);
-        setTurn(data.turn);
-        setWinner(null);
-        setSelectedCell(null);
-        setMoveError(null);
-        const me = data.players.find((p: any) => p.socketId === socket.id);
-        if (me) setMyColor(me.color);
-     });
+      socket.on("checkers_board_updated", (data) => {
+         setBoard(data.board);
+         setTurn(data.turn);
+         setMoveError(null);
+         if (data.multiJumpIndex !== undefined && data.multiJumpIndex !== null)
+            setSelectedCell(data.multiJumpIndex);
+         else setSelectedCell(null);
+      });
 
-     socket.on("checkers_board_updated", (data) => {
-        setBoard(data.board);
-        setTurn(data.turn);
-        setMoveError(null);
-        if (data.multiJumpIndex !== undefined && data.multiJumpIndex !== null)
-           setSelectedCell(data.multiJumpIndex);
-        else setSelectedCell(null);
-     });
+      socket.on("checkers_game_over", (data) => {
+         setBoard(data.board);
+         setWinner(data.winner);
+         setSelectedCell(null);
+      });
 
-     socket.on("checkers_game_over", (data) => {
-        setBoard(data.board);
-        setWinner(data.winner);
-        setSelectedCell(null);
-     });
+      socket.on("checkers_invalid_move", (data) => {
+         // Sunucudan gelen hatayı dile göre çeviriyoruz
+         if (data?.reason === "MUST_CAPTURE") {
+            setSelectedCell(null);
+            setMoveError(t.checkers.mustCapture);
+         } else if (data?.reason === "MUST_CONTINUE_JUMP")
+            setMoveError(t.checkers.mustContinueJump);
+         else setSelectedCell(null);
+         setTimeout(() => setMoveError(null), 3000);
+      });
 
-     socket.on("checkers_invalid_move", (data) => {
-        if (data?.reason === "MUST_CAPTURE") {
-           setSelectedCell(null);
-           setMoveError("Yiyebileceğin bir taş varken başka hamle yapamazsın!");
-        } else if (data?.reason === "MUST_CONTINUE_JUMP")
-           setMoveError(
-              "Seri yeme devam ediyor! Sadece işaretli taşı oynayabilirsin.",
-           );
-        else setSelectedCell(null);
-        setTimeout(() => setMoveError(null), 3000);
-     });
-
-     return () => {
-        socket.off("checkers_waiting_in_queue");
-        socket.off("checkers_private_room_created");
-        socket.off("checkers_room_error");
-        socket.off("checkers_match_found");
-        socket.off("checkers_board_updated");
-        socket.off("checkers_game_over");
-        socket.off("checkers_invalid_move");
-     };
-  }, [socket]);
+      return () => {
+         socket.off("checkers_waiting_in_queue");
+         socket.off("checkers_private_room_created");
+         socket.off("checkers_room_error");
+         socket.off("checkers_match_found");
+         socket.off("checkers_board_updated");
+         socket.off("checkers_game_over");
+         socket.off("checkers_invalid_move");
+      };
+   }, [socket, t]);
 
    const handleFindMatch = () => socket?.emit("checkers_find_match");
    const handleCreatePrivateRoom = () =>
@@ -117,7 +117,7 @@ export default function CheckersGame() {
    const shareToTelegram = async () => {
       if (!inviteCode) return;
       const shareUrl = `https://t.me/${process.env.NEXT_PUBLIC_TG_BOT}/${process.env.NEXT_PUBLIC_TG_APP}?startapp=${inviteCode}`;
-      const text = `Seni canlı Dama düellosuna davet ediyorum! Bakalım beni yenebilecek misin? ⚔️`;
+      const text = t.checkers.shareText;
       if (typeof window !== "undefined") {
          const WebApp = (await import("@twa-dev/sdk")).default;
          WebApp.openTelegramLink(
@@ -133,9 +133,7 @@ export default function CheckersGame() {
          roomData.multiJumpIndex !== undefined
       ) {
          if (board[index] !== 0 && index !== roomData.multiJumpIndex) {
-            setMoveError(
-               "Seri yeme devam ediyor! Sadece işaretli taşı oynayabilirsin.",
-            );
+            setMoveError(t.checkers.mustContinueJump);
             setTimeout(() => setMoveError(null), 3000);
             return;
          }
@@ -167,7 +165,7 @@ export default function CheckersGame() {
                href="/"
                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-sm font-bold transition-colors"
             >
-               ⬅ Ana Menü
+               {t.common.mainMenu}
             </Link>
          </div>
          <AnimatePresence>
@@ -189,7 +187,7 @@ export default function CheckersGame() {
             className="bg-zinc-900 p-6 rounded-xl shadow-lg border border-zinc-800 w-full max-w-sm relative mt-8"
          >
             <h2 className="text-xl font-bold mb-4 text-center border-b border-zinc-800 pb-4">
-               🏁 1v1 Dama
+               {t.games.checkersTitle}
             </h2>
 
             <AnimatePresence mode="wait">
@@ -208,8 +206,8 @@ export default function CheckersGame() {
                            className={`w-full py-3 rounded-lg font-bold transition-colors ${isSearching ? "bg-blue-600 animate-pulse text-white" : !isConnected ? "bg-zinc-700 text-zinc-500" : "bg-purple-600 hover:bg-purple-500 text-white"}`}
                         >
                            {isSearching
-                              ? "Rakip Aranıyor..."
-                              : "🎲 Rastgele Maç Ara"}
+                              ? t.common.searching
+                              : t.common.randomMatch}
                         </button>
                         {!isSearching && (
                            <div className="flex gap-2 w-full">
@@ -218,7 +216,7 @@ export default function CheckersGame() {
                                  disabled={!isConnected}
                                  className="flex-1 py-3 bg-purple-700 hover:bg-purple-600 text-white rounded-lg font-bold transition-colors text-sm"
                               >
-                                 ⚔️ Düello Kur
+                                 {t.common.createDuel}
                               </button>
                               <button
                                  onClick={() =>
@@ -227,7 +225,7 @@ export default function CheckersGame() {
                                  disabled={!isConnected}
                                  className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white rounded-lg font-bold transition-colors text-sm"
                               >
-                                 Katıl
+                                 {t.common.join}
                               </button>
                            </div>
                         )}
@@ -239,7 +237,7 @@ export default function CheckersGame() {
                            >
                               <input
                                  type="text"
-                                 placeholder="Oda Kodu (cpvp_...)"
+                                 placeholder={t.checkers.roomCodePlaceholder}
                                  value={joinCodeInput}
                                  onChange={(e) =>
                                     setJoinCodeInput(e.target.value)
@@ -250,7 +248,7 @@ export default function CheckersGame() {
                                  onClick={handleJoinPrivateRoom}
                                  className="bg-purple-600 hover:bg-purple-500 px-4 rounded-lg font-bold text-sm"
                               >
-                                 Git
+                                 {t.common.go}
                               </button>
                            </motion.div>
                         )}
@@ -263,10 +261,10 @@ export default function CheckersGame() {
                         className="text-center bg-zinc-800 p-4 rounded-lg border border-purple-500/50"
                      >
                         <h3 className="text-purple-400 font-bold mb-2">
-                           ⚔️ Düello Odası Hazır!
+                           {t.common.roomReady}
                         </h3>
                         <p className="text-xs text-zinc-400 mb-4">
-                           Arkadaşını davet et veya alttaki kodu gönder.
+                           {t.common.inviteFriendDesc}
                         </p>
                         <div className="bg-zinc-950 p-3 rounded-lg mb-4 select-all font-mono text-xs border border-zinc-700">
                            {inviteCode}
@@ -276,13 +274,13 @@ export default function CheckersGame() {
                               onClick={shareToTelegram}
                               className="flex-1 bg-blue-600 hover:bg-blue-500 py-2 rounded-lg font-bold text-xs"
                            >
-                              Telegram'da Paylaş
+                              {t.common.shareTelegram}
                            </button>
                            <button
                               onClick={() => setInviteCode(null)}
                               className="px-3 bg-zinc-700 hover:bg-zinc-600 rounded-lg font-bold text-xs"
                            >
-                              İptal
+                              {t.common.cancel}
                            </button>
                         </div>
                      </motion.div>
@@ -302,7 +300,7 @@ export default function CheckersGame() {
                         >
                            🔴 {roomData.players[0].username}
                         </span>
-                        <span className="text-zinc-600">vs</span>
+                        <span className="text-zinc-600">{t.common.vs}</span>
                         <span
                            className={
                               myColor === "WHITE"
@@ -316,11 +314,11 @@ export default function CheckersGame() {
                      <h3 className="text-sm font-semibold mb-4 text-zinc-300">
                         {winner
                            ? winner === socket?.id
-                              ? "🎉 Kazandın!"
-                              : "💀 Kaybettin!"
+                              ? t.common.youWin
+                              : t.common.youLose
                            : turn === socket?.id
-                             ? "🟢 Senin Sıran!"
-                             : "⏳ Rakibin Sırası..."}
+                             ? t.common.yourTurn
+                             : t.common.opponentsTurn}
                      </h3>
                      <div className="grid grid-cols-8 gap-0 border-2 border-zinc-700 rounded-lg overflow-hidden w-full aspect-square bg-zinc-950 shadow-2xl relative">
                         {displayIndices.map((actualIndex) => {
@@ -369,7 +367,7 @@ export default function CheckersGame() {
                            onClick={() => setRoomData(null)}
                            className="mt-6 w-full py-2 bg-zinc-700 hover:bg-zinc-600 rounded-lg text-sm font-bold transition-colors"
                         >
-                           Menüye Dön
+                           {t.common.backToMenu}
                         </button>
                      )}
                   </motion.div>
